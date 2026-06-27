@@ -1493,6 +1493,16 @@ class Scheduler:
         # enforcer must never touch Metal directly.
         self._pending_reclaim_request: bool = False
 
+        # Pressure-driven Metal reclaim: set by the enforcer on soft OR hard
+        # memory pressure (not just hard+idle like _pending_reclaim_request).
+        # Drained in step() even while the scheduler is busy, because the
+        # reclaim only frees unreferenced Metal buffers (residual KV from
+        # finished requests) and is safe mid-batch on the inference thread.
+        # Without this, long stateless batches accumulate residual KV until the
+        # process hits the memory ceiling and every later request is rejected.
+        self._pending_pressure_reclaim: bool = False
+        self._last_pressure_reclaim_step: int = -10**9
+
         # Lock-free admin snapshot. Published at the end of each step() while
         # the engine thread is the sole writer of running/waiting; the admin
         # endpoint reads the dict reference atomically (GIL) and never iterates
@@ -6695,6 +6705,51 @@ class Scheduler:
             after / 1024**3,
         )
 
+    def request_pressure_reclaim(self) -> None:
+        """Enqueue a pressure-driven Metal reclaim (thread-safe, no Metal touch).
+
+        Set by ProcessMemoryEnforcer on soft OR hard memory pressure. Unlike
+        ``request_idle_reclaim``, this is drained in ``step()`` even while the
+        scheduler is busy, because the reclaim only frees unreferenced Metal
+        buffers (residual KV from finished requests) and is safe mid-batch on
+        the inference thread.
+        """
+        self._pending_pressure_reclaim = True
+
+    def _process_pressure_reclaim(self) -> None:
+        """Drain a pressure-driven Metal reclaim (inference-thread side).
+
+        Runs ``gc.collect()`` + ``_sync_and_clear_cache()`` to return finished
+        requests' residual Metal buffers to the OS. This is what lets long
+        stateless batches (where prefix cache never hits) keep running instead
+        of accumulating residual KV up to the memory ceiling.
+
+        Safe mid-batch: ``mx.clear_cache()`` only frees unreferenced buffers,
+        so in-flight decode/prefill KV is untouched; ``_sync_and_clear_cache``
+        drains in-flight GPU work first and holds ``_mx_buffer_access_lock`` so
+        the async store-cache worker can't observe a half-reclaimed pool.
+        Cooldown-bounded so we don't sync+clear every step.
+        """
+        if not self._pending_pressure_reclaim:
+            return
+        if self._step_counter - self._last_pressure_reclaim_step < 128:
+            return
+        self._pending_pressure_reclaim = False
+        self._last_pressure_reclaim_step = self._step_counter
+        import gc
+
+        before = self._current_usage_bytes()
+        gc.collect()
+        _sync_and_clear_cache(self._stream)
+        after = self._current_usage_bytes()
+        logger.info(
+            "Pressure reclaim: released %.2fGB residual Metal buffers "
+            "(%.2fGB -> %.2fGB)",
+            (before - after) / 1024**3,
+            before / 1024**3,
+            after / 1024**3,
+        )
+
     def _do_abort_request(self, request_id: str) -> bool:
         """
         Actually abort a request. Must be called from the step() context.
@@ -9103,6 +9158,11 @@ class Scheduler:
         # Drain a deferred between-turn reclaim requested by the memory
         # enforcer (only acts when the scheduler is idle).
         self._process_pending_reclaim()
+        # Drain a pressure-driven reclaim (soft/hard pressure); unlike the
+        # idle reclaim above this runs even while busy, returning finished
+        # requests' residual Metal buffers to the OS so stateless batches
+        # don't accumulate residual KV to the memory ceiling.
+        self._process_pressure_reclaim()
 
         # Drain async store_cache completions from prior steps. Each completed
         # entry triggers the deferred batch_generator.remove(uid) on the

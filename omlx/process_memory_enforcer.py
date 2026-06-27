@@ -1193,6 +1193,20 @@ class ProcessMemoryEnforcer:
                 f"ceiling={_format_gb(ceiling)})"
             )
 
+        if new_level in ("soft", "hard"):
+            # Ask each loaded scheduler to reclaim residual Metal buffers
+            # left by finished requests. Triggered on soft pressure too — not
+            # just hard+idle — so long stateless batches (where each prompt
+            # differs and prefix cache never hits) don't accumulate residual
+            # KV up to the ceiling before any reclaim runs. This only sets a
+            # GIL-atomic flag; the actual gc + _sync_and_clear_cache runs on
+            # the inference thread (cooldown-bounded), never on this asyncio
+            # thread (Metal must not be touched from here, see #300/#888/#1106).
+            for entry in self._engine_pool._entries.values():
+                sched = self._resolve_scheduler(entry)
+                if sched is not None and hasattr(sched, "request_pressure_reclaim"):
+                    sched.request_pressure_reclaim()
+
         if new_level == "hard":
             freed_hot = await asyncio.to_thread(
                 self._shrink_hot_cache_for_pressure,
