@@ -6739,7 +6739,7 @@ class Scheduler:
         import time
 
         now = time.monotonic()
-        if now - self._last_pressure_reclaim_ts < 5.0:
+        if now - self._last_pressure_reclaim_ts < 2.0:
             return
         self._pending_pressure_reclaim = False
         self._last_pressure_reclaim_ts = now
