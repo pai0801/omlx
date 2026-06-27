@@ -1501,7 +1501,11 @@ class Scheduler:
         # Without this, long stateless batches accumulate residual KV until the
         # process hits the memory ceiling and every later request is rejected.
         self._pending_pressure_reclaim: bool = False
-        self._last_pressure_reclaim_step: int = -10**9
+        # Cooldown is time-based (monotonic seconds), not step-based, so the
+        # idle-dispatch path from EngineCore._engine_loop respects it too —
+        # step_counter does not advance while idle, which would otherwise gate
+        # reclaim forever once a stateless batch deadlocks.
+        self._last_pressure_reclaim_ts: float = -10**9
 
         # Lock-free admin snapshot. Published at the end of each step() while
         # the engine thread is the sole writer of running/waiting; the admin
@@ -6732,10 +6736,13 @@ class Scheduler:
         """
         if not self._pending_pressure_reclaim:
             return
-        if self._step_counter - self._last_pressure_reclaim_step < 128:
+        import time
+
+        now = time.monotonic()
+        if now - self._last_pressure_reclaim_ts < 5.0:
             return
         self._pending_pressure_reclaim = False
-        self._last_pressure_reclaim_step = self._step_counter
+        self._last_pressure_reclaim_ts = now
         import gc
 
         before = self._current_usage_bytes()

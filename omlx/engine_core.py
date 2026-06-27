@@ -463,6 +463,19 @@ class EngineCore:
                                     event.wait(), timeout=step_interval
                                 )
                 else:
+                    if getattr(self.scheduler, "_pending_pressure_reclaim", False):
+                        # step() never runs while there are no requests, so the
+                        # pressure-reclaim flag set by ProcessMemoryEnforcer
+                        # would never drain — a deadlock for stateless batches
+                        # where residual KV accumulates until every request is
+                        # preflight-rejected (no work -> step() idle -> reclaim
+                        # never fires -> memory never freed). Drain it here on
+                        # the inference thread (same _mlx_executor that runs
+                        # step(), so self._stream is valid).
+                        await loop.run_in_executor(
+                            self._mlx_executor,
+                            self.scheduler._process_pressure_reclaim,
+                        )
                     event = self._wake_event
                     if event is None:
                         await asyncio.sleep(step_interval)
