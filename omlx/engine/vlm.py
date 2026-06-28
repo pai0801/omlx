@@ -1610,19 +1610,25 @@ class VLMBatchedEngine(BaseEngine):
 
     async def stop(self) -> None:
         """Stop the engine and cleanup resources."""
-        if self._engine:
-            await self._engine.stop()
-            if hasattr(self._engine, "engine") and self._engine.engine is not None:
-                try:
-                    self._engine.engine.close()
-                except Exception as e:
-                    logger.warning(f"Error closing engine: {e}")
-        if self._vision_cache is not None:
-            self._vision_cache.close()
-            self._vision_cache = None
+        engine = self._engine
+
         for cancel_event in getattr(self, "_diffusion_cancel_events", ()):
             cancel_event.set()
-        self._diffusion_cancel_events = set()
+
+        if engine:
+            await engine.stop()
+
+        if self._vision_cache is not None:
+            try:
+                self._vision_cache.close()
+            except Exception:
+                logger.warning("Error closing vision feature cache", exc_info=True)
+            self._vision_cache = None
+
+        # Drop wrapper-side references before EngineCore.close() performs its
+        # final worker-thread MLX reclaim. Otherwise the VLM wrapper can keep
+        # model weights or cached feature arrays alive until after the reclaim
+        # pass has already run.
         self._engine = None
         self._vlm_model = None
         self._processor = None
@@ -1630,6 +1636,14 @@ class VLMBatchedEngine(BaseEngine):
         self._tokenizer = None
         self._vlm_mtp_drafter = None
         self._diffusion_family = None
+
+        if engine:
+            if hasattr(engine, "engine") and engine.engine is not None:
+                try:
+                    engine.engine.close()
+                except Exception as e:
+                    logger.warning(f"Error closing engine: {e}")
+        self._diffusion_cancel_events = set()
         self._diffusion_active_requests = 0
         self._loaded = False
         logger.info("VLMBatchedEngine stopped")
