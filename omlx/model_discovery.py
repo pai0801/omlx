@@ -96,7 +96,7 @@ def is_helper_config_model_type(config_model_type: str | None) -> bool:
     DFlash drafts, whose model_type is a plain ``qwen3`` — use
     :func:`is_helper_model_config` when the full config dict is available.
     """
-    if not config_model_type:
+    if not isinstance(config_model_type, str) or not config_model_type:
         return False
     mt = config_model_type.lower()
     return mt.endswith(HELPER_CONFIG_MODEL_TYPE_SUFFIXES)
@@ -117,7 +117,12 @@ def is_helper_model_config(config: dict) -> bool:
         return True
     if any(key in config for key in _HELPER_CONFIG_KEYS):
         return True
-    for arch in config.get("architectures") or []:
+    architectures = config.get("architectures") or []
+    if isinstance(architectures, str):
+        architectures = [architectures]
+    elif not isinstance(architectures, list | tuple | set):
+        return False
+    for arch in architectures:
         arch_lower = str(arch).lower()
         if any(token in arch_lower for token in _HELPER_ARCH_TOKENS):
             return True
@@ -1095,6 +1100,31 @@ def _safetensors_has_mlx_metadata(path: Path) -> bool:
 
 _MLX_NAME_RE = re.compile(r"(^|[-_/])mlx($|[-_/])", re.IGNORECASE)
 
+# Speculative-decoding helper checkpoints (e.g. z-lab/Qwen3.6-27B-DFlash) are
+# MLX-loadable drafts even though their safetensors are saved in PyTorch ("pt")
+# format and the repo name carries no "mlx" token, so the HF-cache MLX
+# heuristic must recognise them explicitly or they vanish from the draft-model
+# picker (#1643). Detection delegates to is_helper_model_config so the drafter
+# markers stay in sync with helper flagging and engine_pool's drafter
+# resolution.
+def _is_helper_checkpoint(model_path: Path) -> bool:
+    """True if ``model_path`` is a speculative-decoding helper checkpoint.
+
+    Must never raise on an unreadable entry: unlike the config reads inside
+    _register_model, this runs outside discover_models' per-model guard, so
+    an escaped exception would abort the whole scan. UnicodeDecodeError from
+    a non-UTF-8 config.json is a ValueError, not a JSONDecodeError.
+    """
+    config_path = model_path / "config.json"
+    if not config_path.exists():
+        return False
+    try:
+        with open(config_path) as f:
+            config = json.load(f)
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+        return False
+    return is_helper_model_config(config)
+
 
 def _is_hf_cache_mlx_compatible(model_dir: Path, source_repo_id: str) -> bool:
     """Heuristic for HF cache entries that can be loaded without conversion."""
@@ -1110,6 +1140,13 @@ def _is_hf_cache_mlx_compatible(model_dir: Path, source_repo_id: str) -> bool:
     if repo_lower.startswith("mlx-community/") or _MLX_NAME_RE.search(source_repo_id):
         logger.info(
             f"Treating HF cache model as MLX-compatible by repo name: {source_repo_id}"
+        )
+        return True
+
+    if _is_helper_checkpoint(model_dir):
+        logger.info(
+            f"Treating HF cache model as MLX-compatible speculative-decoding "
+            f"helper: {source_repo_id}"
         )
         return True
 

@@ -10,6 +10,7 @@ import pytest
 from omlx.model_discovery import (
     DiscoveredModel,
     _is_adapter_dir,
+    _is_helper_checkpoint,
     _is_unsupported_model,
     _read_model_context_length,
     _register_model,
@@ -37,7 +38,7 @@ class TestIsHelperConfigModelType:
 
     @pytest.mark.parametrize(
         "config_model_type",
-        ["qwen3", "gemma4_text", "gemma4", "llama", "qwen2_5_vl", "", None],
+        ["qwen3", "gemma4_text", "gemma4", "llama", "qwen2_5_vl", "", None, 123],
     )
     def test_non_helper_types(self, config_model_type):
         assert is_helper_config_model_type(config_model_type) is False
@@ -77,6 +78,7 @@ class TestIsHelperModelConfig:
             {"model_type": "llama"},
             {},
             {"architectures": None},
+            {"model_type": 123, "architectures": 123},
         ],
     )
     def test_non_helper_configs(self, config):
@@ -1503,6 +1505,17 @@ class TestHfCacheDiscovery:
         models = discover_models(tmp_path)
         assert len(models) == 0
 
+    def test_hf_cache_bad_helper_schema_is_skipped(self, tmp_path):
+        """A malformed helper-looking schema must not abort HF cache discovery."""
+        _, snapshot = self._make_hf_cache_entry(tmp_path, "acme", "BadSchema")
+        (snapshot / "config.json").write_text(
+            json.dumps({"model_type": "qwen3", "architectures": 123})
+        )
+        (snapshot / "model.safetensors").write_bytes(b"0" * 1000)
+
+        models = discover_models(tmp_path)
+        assert models == {}
+
     def test_hf_cache_mlx_metadata_is_discovered(self, tmp_path):
         """HF cache entries with safetensors format=mlx metadata are discovered."""
         np = pytest.importorskip("numpy")
@@ -1520,6 +1533,86 @@ class TestHfCacheDiscovery:
         assert len(models) == 1
         assert "acme--PlainModel" in models
         assert models["acme--PlainModel"].source_repo_id == "acme/PlainModel"
+
+    def test_hf_cache_dflash_draft_is_discovered(self, tmp_path):
+        """HF cache DFlash draft checkpoints are discovered despite pt-format
+        safetensors and a repo name with no 'mlx' token (#1643)."""
+        np = pytest.importorskip("numpy")
+        safetensors_numpy = pytest.importorskip("safetensors.numpy")
+
+        entry, snapshot = self._make_hf_cache_entry(
+            tmp_path, "z-lab", "Qwen3.6-27B-DFlash"
+        )
+        (snapshot / "config.json").write_text(
+            json.dumps(
+                {
+                    "model_type": "qwen3",
+                    "architectures": ["DFlashDraftModel"],
+                    "dflash_config": {},
+                }
+            )
+        )
+        # pt-format safetensors (NOT mlx) so only the DFlash architecture — not
+        # safetensors metadata or the repo name — can qualify this entry.
+        safetensors_numpy.save_file(
+            {"weight": np.zeros((1,), dtype=np.float32)},
+            snapshot / "model.safetensors",
+            metadata={"format": "pt"},
+        )
+
+        models = discover_models(tmp_path)
+        assert "z-lab--Qwen3.6-27B-DFlash" in models
+        # The shared DiscoveredModel construction path must flag the draft as
+        # a helper so it lands in the draft picker, not the chat-model list.
+        assert models["z-lab--Qwen3.6-27B-DFlash"].is_helper is True
+
+    def test_is_helper_checkpoint_on_disk_edge_cases(self, tmp_path):
+        """The on-disk wrapper qualifies a drafter config and never raises on
+        unreadable entries (it runs outside discover_models' per-model guard).
+
+        Marker-family coverage lives in TestIsHelperModelConfig; this pins
+        only the wrapper's own file-handling behavior.
+        """
+        draft = tmp_path / "draft"
+        draft.mkdir()
+        (draft / "config.json").write_text(
+            json.dumps({"model_type": "qwen3", "architectures": ["DFlashDraftModel"]})
+        )
+        assert _is_helper_checkpoint(draft) is True
+
+        # plain (non-draft) model config stays excluded
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        (plain / "config.json").write_text(
+            json.dumps({"model_type": "llama", "architectures": ["LlamaForCausalLM"]})
+        )
+        assert _is_helper_checkpoint(plain) is False
+
+        # no config.json at all
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        assert _is_helper_checkpoint(empty) is False
+
+        # malformed JSON must not raise
+        bad_json = tmp_path / "bad-json"
+        bad_json.mkdir()
+        (bad_json / "config.json").write_text("{not json")
+        assert _is_helper_checkpoint(bad_json) is False
+
+        # non-UTF-8 bytes must not raise: UnicodeDecodeError is a ValueError,
+        # not a JSONDecodeError, and an escape here aborts the whole scan
+        bad_bytes = tmp_path / "bad-bytes"
+        bad_bytes.mkdir()
+        (bad_bytes / "config.json").write_bytes(b'\xff\xfe{"a": 1}')
+        assert _is_helper_checkpoint(bad_bytes) is False
+
+        # valid JSON with an unexpected schema must not raise either
+        bad_schema = tmp_path / "bad-schema"
+        bad_schema.mkdir()
+        (bad_schema / "config.json").write_text(
+            json.dumps({"model_type": "qwen3", "architectures": 123})
+        )
+        assert _is_helper_checkpoint(bad_schema) is False
 
     def test_mixed_flat_and_hf_cache(self, tmp_path):
         """Mix of flat models and HF cache entries."""
