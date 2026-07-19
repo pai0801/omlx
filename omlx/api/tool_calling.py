@@ -285,6 +285,62 @@ def _parse_namespaced_tool_calls(
     return cleaned, tool_calls
 
 
+def _parse_minicpm_tool_calls(
+    text: str,
+) -> Tuple[str, Optional[List[ToolCall]]]:
+    """
+    Parse MiniCPM5-style tool calls.
+
+    MiniCPM5 emits tool calls as bare XML with no ``<tool_call>`` envelope::
+
+        <function name="func_name"><param name="key">value</param></function>
+
+    This needs a dedicated parser because it differs from the Qwen/Llama
+    format (``<function=name><parameter=key>``) handled in
+    ``_parse_xml_tool_calls``: MiniCPM5 uses an attribute-style opening tag
+    (``name="..."``) and ``<param>`` rather than ``<parameter>``.
+
+    Returns:
+        Tuple of (cleaned_text, tool_calls or None)
+    """
+    tool_calls = []
+    func_pattern = re.compile(
+        r'<function\s+name="([^"]+)">(.*?)</function>', re.DOTALL
+    )
+    matches = list(func_pattern.finditer(text))
+    if not matches:
+        return text, None
+
+    for match in matches:
+        func_name = match.group(1)
+        params_text = match.group(2)
+        arguments = {}
+        for pm in re.finditer(
+            r'<param\s+name="([^"]+)">\s*(.*?)\s*</param>',
+            params_text,
+            re.DOTALL,
+        ):
+            key = pm.group(1)
+            val = pm.group(2).strip()
+            try:
+                arguments[key] = json.loads(val)
+            except (json.JSONDecodeError, ValueError):
+                arguments[key] = val
+        tool_calls.append(
+            ToolCall(
+                id=f"call_{uuid.uuid4().hex[:8]}",
+                type="function",
+                function=FunctionCall(
+                    name=func_name,
+                    arguments=json.dumps(arguments, ensure_ascii=False),
+                ),
+            )
+        )
+
+    cleaned = func_pattern.sub("", text).strip()
+    return cleaned, tool_calls
+
+
 def _parse_hermes_tool_calls(text: str) -> Tuple[str, Optional[List[ToolCall]]]:
     """
     Fallback parser for Hermes-style tool call formats.
@@ -1246,6 +1302,14 @@ def _parse_tool_calls_impl(
                     if idx >= 0:
                         cleaned_text = cleaned_text[:idx].strip()
                 return cleaned_text, tool_calls
+
+    # Fallback: MiniCPM5 bare-XML tool calls
+    # (<function name="X"><param name="Y">value</param></function>, with no
+    # <tool_call> envelope). Dedicated parser because MiniCPM5 uses <param>
+    # (not <parameter>) and a name="" attribute opening tag, which none of the
+    # generic parsers below match.
+    if re.search(r'<function\s+name="[^"]+">', cleaned_text):
+        return _parse_minicpm_tool_calls(cleaned_text)
 
     # Fallback: parse XML <tool_call> tags (GLM, Qwen, generic formats)
     if "<tool_call>" in cleaned_text:
