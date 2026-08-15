@@ -4709,8 +4709,8 @@ class TestBuildStateMachineStopStrings:
     """Tests for _build_state_machine stop-string tokenization.
 
     The scheduler must convert SamplingParams.stop (a list of strings)
-    into token-sequence transitions on the per-request state machine,
-    so mlx-lm's BatchGenerator can halt on user-supplied stop sequences.
+    into stop sequences on the per-request StopSequenceMatcher, so
+    mlx-lm's BatchGenerator can halt on user-supplied stop sequences.
     """
 
     def _make_scheduler(self, mock_model, mock_tokenizer):
@@ -4726,9 +4726,9 @@ class TestBuildStateMachineStopStrings:
     def test_no_stop_string_only_eos_transitions(self, mock_model, mock_tokenizer):
         scheduler = self._make_scheduler(mock_model, mock_tokenizer)
         sm = scheduler._build_state_machine(self._request_with_stop([]))
-        # SequenceStateMachine has internal _states dict; non-empty implies
+        # StopSequenceMatcher has an internal _trie dict; non-empty implies
         # at least the EOS transitions are present.
-        assert sm._states
+        assert sm._trie
 
     def test_stop_string_added_as_token_sequence(self, mock_model, mock_tokenizer):
         scheduler = self._make_scheduler(mock_model, mock_tokenizer)
@@ -4739,7 +4739,7 @@ class TestBuildStateMachineStopStrings:
         sm = scheduler._build_state_machine(self._request_with_stop(["delta"]))
         # Walk the trie following expected_seq; the terminal node must
         # have a __match__ entry, meaning the sequence is registered.
-        node = sm._states["normal"][0]
+        node = sm._trie
         for tok in expected_seq:
             assert tok in node, f"token {tok} missing from trie"
             node = node[tok]
@@ -4751,7 +4751,7 @@ class TestBuildStateMachineStopStrings:
         # should be tokenized.
         sm = scheduler._build_state_machine(self._request_with_stop(["", "real", 123]))
         real_seq = mock_tokenizer.encode("real", add_special_tokens=False)
-        node = sm._states["normal"][0]
+        node = sm._trie
         for tok in real_seq:
             assert tok in node
             node = node[tok]
@@ -4762,7 +4762,7 @@ class TestBuildStateMachineStopStrings:
         sm = scheduler._build_state_machine(self._request_with_stop(["foo", "bar"]))
         for stop_str in ("foo", "bar"):
             seq = mock_tokenizer.encode(stop_str, add_special_tokens=False)
-            node = sm._states["normal"][0]
+            node = sm._trie
             for tok in seq:
                 assert tok in node
                 node = node[tok]

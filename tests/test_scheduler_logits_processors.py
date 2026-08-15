@@ -152,7 +152,7 @@ def _bare_generation_batch(uid, logits_processors):
     batch.samplers = [lambda x: x]
     batch.fallback_sampler = lambda x: x
     batch.logits_processors = logits_processors
-    batch.state_machines = [object()]
+    batch.stop_matchers = [object()]
     batch.max_tokens = [4]
     batch._current_tokens = None
     batch._current_logprobs = []
@@ -235,7 +235,7 @@ class TestFilterStaleProcessorAlignment:
         batch.tokens = [[1], [2]]
         batch.samplers = [lambda x: x, lambda x: x]
         batch.logits_processors = [[], [grammar_processor]]
-        batch.state_machines = [object(), object()]
+        batch.stop_matchers = [object(), object()]
         batch.max_tokens = [4, 4]
         batch._next_logprobs = [object(), object()]
         batch._token_context = [object(), object()]

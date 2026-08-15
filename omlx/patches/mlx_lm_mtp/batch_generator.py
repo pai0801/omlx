@@ -82,6 +82,18 @@ from . import cache_rollback as _rollback_mod
 logger = logging.getLogger(__name__)
 
 
+def _stop_matcher_cls() -> Any:
+    """Resolve mlx-lm's StopSequenceMatcher lazily (post-#1501 API).
+
+    The MTP patch runs against whatever mlx_lm.generate is installed, so
+    the class is imported at call time instead of module import time.
+    """
+
+    from mlx_lm.generate import StopSequenceMatcher
+
+    return StopSequenceMatcher
+
+
 def _set_verify_qmm_armed(flag: bool) -> None:
     """Arm the verify-shape qmm routing for the duration of an MTP forward.
 
@@ -854,7 +866,7 @@ def _make_row_batch(
         logits_processors=[
             _row_value(getattr(gen_batch, "logits_processors", None), idx, [])
         ],
-        state_machines=[_row_value(getattr(gen_batch, "state_machines", None), idx)],
+        stop_matchers=[_row_value(getattr(gen_batch, "stop_matchers", None), idx)],
         max_tokens=[_row_value(getattr(gen_batch, "max_tokens", None), idx)],
         _next_tokens=next_tokens[idx : idx + 1] if next_tokens is not None else None,
         _next_logprobs=(
@@ -1961,19 +1973,19 @@ def _emit_batch_responses(gen_batch: Any, batch_state: _MtpBatchState) -> List[A
         _bump_emit_stat(state, source)
 
         finish_reason: Optional[str] = None
-        match_sequence = None
+        matched = False
 
         gen_batch.tokens[idx].append(token_id)
         gen_batch._num_tokens[idx] += 1
         if gen_batch._num_tokens[idx] >= gen_batch.max_tokens[idx]:
             finish_reason = "length"
 
-        new_state, match_sequence, current_state = gen_batch.state_machines[idx].match(
+        gen_batch._matcher_states[idx], matched = _stop_matcher_cls().match(
             gen_batch._matcher_states[idx],
+            gen_batch.stop_matchers[idx]._trie,
             token_id,
         )
-        gen_batch._matcher_states[idx] = new_state
-        if match_sequence is not None and current_state is None:
+        if matched:
             finish_reason = "stop"
 
         if finish_reason is not None:
@@ -1983,8 +1995,6 @@ def _emit_batch_responses(gen_batch: Any, batch_state: _MtpBatchState) -> List[A
                     token=token_id,
                     logprobs=logprobs_1d,
                     finish_reason=finish_reason,
-                    current_state=current_state,
-                    match_sequence=match_sequence,
                     prompt_cache=gen_batch.extract_cache(idx),
                     all_tokens=gen_batch.tokens[idx],
                 )
@@ -1999,8 +2009,6 @@ def _emit_batch_responses(gen_batch: Any, batch_state: _MtpBatchState) -> List[A
                     token=token_id,
                     logprobs=logprobs_1d,
                     finish_reason=None,
-                    current_state=current_state,
-                    match_sequence=match_sequence,
                     prompt_cache=None,
                     all_tokens=None,
                 )
@@ -2611,18 +2619,17 @@ def _emit_response(
     Response = type(gen_batch).Response
 
     finish_reason: Optional[str] = None
-    match_sequence = None
+    matched = False
 
     gen_batch.tokens[0].append(token_id)
     gen_batch._num_tokens[0] += 1
     if gen_batch._num_tokens[0] >= gen_batch.max_tokens[0]:
         finish_reason = "length"
 
-    new_state, match_sequence, current_state = gen_batch.state_machines[0].match(
-        gen_batch._matcher_states[0], token_id
+    gen_batch._matcher_states[0], matched = _stop_matcher_cls().match(
+        gen_batch._matcher_states[0], gen_batch.stop_matchers[0]._trie, token_id
     )
-    gen_batch._matcher_states[0] = new_state
-    if match_sequence is not None and current_state is None:
+    if matched:
         finish_reason = "stop"
 
     if finish_reason is not None:
@@ -2633,8 +2640,6 @@ def _emit_response(
             token=token_id,
             logprobs=logprobs_1d,
             finish_reason=finish_reason,
-            current_state=current_state,
-            match_sequence=match_sequence,
             prompt_cache=prompt_cache,
             all_tokens=all_tokens,
         )
@@ -2656,8 +2661,6 @@ def _emit_response(
             token=token_id,
             logprobs=logprobs_1d,
             finish_reason=None,
-            current_state=current_state,
-            match_sequence=match_sequence,
             prompt_cache=None,
             all_tokens=None,
         )

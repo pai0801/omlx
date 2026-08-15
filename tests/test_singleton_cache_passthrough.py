@@ -3,7 +3,7 @@
 import importlib
 
 import mlx.core as mx
-from mlx_lm.generate import PromptProcessingBatch, SequenceStateMachine
+from mlx_lm.generate import PromptProcessingBatch, StopSequenceMatcher
 from mlx_lm.models.cache import ArraysCache, BatchKVCache, KVCache
 from mlx_vlm.turboquant import TurboQuantKVCache
 
@@ -106,7 +106,7 @@ def test_prompt_batch_full_split_moves_cache_without_copy():
         samplers=[None],
         fallback_sampler=lambda logits: logits,
         logits_processors=[[]],
-        state_machines=[SequenceStateMachine()],
+        stop_matchers=[StopSequenceMatcher()],
         max_tokens=[8],
     )
 
