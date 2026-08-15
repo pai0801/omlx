@@ -44,15 +44,21 @@ dependencies = [
     # binaries are ABI-coupled to this exact mlx version — bumping the pin
     # requires rebuilding them (OMLX_WITH_CUSTOM_KERNEL=1 setup.py build_ext).
     "mlx==0.32.0",
-    # mlx-lm from commit (ab1806e, v0.31.3) - transformers 5.13+
+    # mlx-lm from commit (254d153, post v0.31.3) - transformers 5.13+
     # NewlineTokenizer registration compatibility, DeepSeek/GLM DSA indexer
     # RoPE fix, trust_remote_code load gate, transformers 5.7.0
-    # compatibility, and prior BatchGenerator/cache fixes.
-    "mlx-lm @ git+https://github.com/ml-explore/mlx-lm@ab1806e8f5d6aa035973af194a1b9198ab4754dc",
+    # compatibility, prior BatchGenerator/cache fixes, plus: XTC per-row
+    # threshold fix (#1575), xtc_threshold default 0.1 (#1372), Falcon-Mamba
+    # long-prompt resource exhaustion fix (#1656), seed=0 honored (#1661),
+    # quantized SDPA GQA + batched padding-mask broadcast fix, text-based
+    # tool/reasoning parser state machine (#1501), IncompleteSnapshotError
+    # fix in hf_repo_to_path (#1504).
+    "mlx-lm @ git+https://github.com/ml-explore/mlx-lm@254d153fdeb6f150edd4fc5a54f9828638481fa8",
     # regex for mlx-lm's Gemma 4 tool parser (uses recursive patterns)
     "regex",
-    # mlx-embeddings from latest commit (32981fa)
-    "mlx-embeddings @ git+https://github.com/Blaizzy/mlx-embeddings@32981fa4e8064ed664b52071789dd18271fe4206",
+    # mlx-embeddings from latest commit (9b28270) - CLS-pooling dispatch
+    # fix for bert + xlm_roberta sentence-transformers models.
+    "mlx-embeddings @ git+https://github.com/Blaizzy/mlx-embeddings@9b28270be81211f2b8daed0041aec65ea5dc4b28",
     # mlx-vlm custom processors bypass HF AutoProcessor, so torch is not required
     # Keep <5.13 until the broader dependency set gets a dedicated resolver
     # smoke test with transformers 5.13+. The mlx-lm pin above includes the
@@ -113,7 +119,7 @@ dependencies = [
     # dflash-mlx v0.1.10 (9ca0028) - bstnxbt repo. Apple G17 NAX verify,
     # prefix snapshot metrics, CopySpec mode, and full-context draft-layer cache checks.
     "dflash-mlx @ git+https://github.com/bstnxbt/dflash-mlx@9ca002898b48e14c9727dec17299f497e8467870",
-    "markitdown[pdf,docx,pptx]==0.1.6",
+    "markitdown[pdf,docx,pptx]==0.1.7",
 ]
 
 [project.optional-dependencies]
@@ -184,8 +190,8 @@ dev = [
     # xgrammar / tvm-ffi version bumps. It skips when these aren't
     # importable, which silently hides regressions — install no-deps
     # in the dev environment so the test actually runs.
-    "xgrammar==0.2.3",
-    "apache-tvm-ffi==0.1.11",
+    "xgrammar==0.2.5",
+    "apache-tvm-ffi==0.1.13.post3",
 ]
 # PEP 735 dependency groups — consumed by `uv sync --dev`.
 # Keep in sync with [project.optional-dependencies] dev above
@@ -199,8 +205,8 @@ dev = [
     "mypy>=1.0.0",
     "mcp>=1.5.0",
     "venvstacks>=0.7.0",
-    "xgrammar==0.2.3",
-    "apache-tvm-ffi==0.1.11",
+    "xgrammar==0.2.5",
+    "apache-tvm-ffi==0.1.13.post3",
 ]
 
 [project.urls]
