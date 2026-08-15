@@ -190,7 +190,7 @@ dev = [
     # xgrammar / tvm-ffi version bumps. It skips when these aren't
     # importable, which silently hides regressions — install no-deps
     # in the dev environment so the test actually runs.
-    "xgrammar==0.2.5",
+    "xgrammar==0.2.4",
     "apache-tvm-ffi==0.1.13.post3",
 ]
 # PEP 735 dependency groups — consumed by `uv sync --dev`.
@@ -205,7 +205,7 @@ dev = [
     "mypy>=1.0.0",
     "mcp>=1.5.0",
     "venvstacks>=0.7.0",
-    "xgrammar==0.2.5",
+    "xgrammar==0.2.4",
     "apache-tvm-ffi==0.1.13.post3",
 ]
 
@@ -237,7 +237,14 @@ include = ["omlx*"]
 # (e.g. mlx-audio -> mlx-lm==0.31.1) so the resolver accepts them.
 override-dependencies = [
     "mlx==0.32.0",
-    "mlx-lm @ git+https://github.com/ml-explore/mlx-lm@ab1806e8f5d6aa035973af194a1b9198ab4754dc",
+    "mlx-lm @ git+https://github.com/ml-explore/mlx-lm@254d153fdeb6f150edd4fc5a54f9828638481fa8",
+    # xgrammar 0.2.4 pins transformers<5 but oMLX runs transformers 5.x;
+    # override the transitive bound (same pattern as the mlx pins above).
+    # oMLX only exercises xgrammar's non-transformers paths (bitmask
+    # allocation via numpy + MLX kernel); upstream main already dropped
+    # the <5 bound, so this override tracks the fix before it ships.
+    "xgrammar==0.2.4",
+    "transformers>=5.7.0,<5.13",
 ]
 
 [tool.black]
