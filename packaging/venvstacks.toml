@@ -40,7 +40,10 @@ dynlib_exclude = [
 ]
 
 [tool.uv]
-exclude-newer = "2026-04-23T00:00:00Z"
+# Reproducibility cutoff. Must stay newer than every PyPI release the
+# resolver needs: transformers 5.15.0 (2026-08-10), mlx-vlm 8683ec1
+# (2026-08-14) and mlx-audio 727fc93 (2026-08-13) pins ride on it.
+exclude-newer = "2026-08-15T00:00:00Z"
 environments = [
     "sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]

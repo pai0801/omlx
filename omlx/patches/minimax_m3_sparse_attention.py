@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import Any
 
@@ -189,8 +190,33 @@ def apply_minimax_m3_sparse_attention_patch() -> bool:
         logger.debug("minimax_m3_sparse_attention: MiniMaxAttention class not found")
         return False
 
+    # mlx-vlm 0.6.14+ (commit 8683ec1) folds the left-padding correction
+    # into MiniMaxAttention.__call__: sparse_q_positions are shifted by
+    # cache.left_padding before reaching the indexer. Patching on top would
+    # double-add the padding, and the old hook points
+    # (_build_sparse_decode_indices) were refactored into
+    # MiniMaxM3Indexer.select_blocks. Detect the upstream fix and step
+    # aside.
+    try:
+        call_src = inspect.getsource(attention_cls.__call__)
+    except (OSError, TypeError):
+        call_src = ""
+    if "left_padding" in call_src:
+        logger.info(
+            "minimax_m3_sparse_attention: upstream already handles "
+            "left-padded sparse positions; patch not needed"
+        )
+        return False
+
     current_call = attention_cls.__dict__.get("__call__")
     if getattr(current_call, _PATCH_MARKER, False):
+        return False
+
+    if "_build_sparse_decode_indices" not in attention_cls.__dict__:
+        logger.debug(
+            "minimax_m3_sparse_attention: unsupported MiniMaxAttention "
+            "layout (no _build_sparse_decode_indices); skipping"
+        )
         return False
 
     attention_cls.__call__ = _make_patched_call(current_call)

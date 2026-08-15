@@ -59,11 +59,11 @@ dependencies = [
     # mlx-embeddings from latest commit (9b28270) - CLS-pooling dispatch
     # fix for bert + xlm_roberta sentence-transformers models.
     "mlx-embeddings @ git+https://github.com/Blaizzy/mlx-embeddings@9b28270be81211f2b8daed0041aec65ea5dc4b28",
-    # mlx-vlm custom processors bypass HF AutoProcessor, so torch is not required
-    # Keep <5.13 until the broader dependency set gets a dedicated resolver
-    # smoke test with transformers 5.13+. The mlx-lm pin above includes the
-    # known NewlineTokenizer registration fix.
-    "transformers>=5.7.0,<5.13",
+    # mlx-vlm custom processors bypass HF AutoProcessor, so torch is not required.
+    # transformers 5.14+ required by mlx-vlm 0.6.13 and mlx-audio 0.4.8.
+    # The mlx-lm pin above includes the NewlineTokenizer registration fix
+    # for 5.13+; the resolver smoke test (tests/) gates this bound.
+    "transformers>=5.14.0,<5.16",
     # transformers 5.x's tokenization_mistral_common module imports
     # ReasoningEffort from mistral_common (added in 1.10). The audio extras
     # transitively pull mistral-common via mlx-audio[stt], which historically
@@ -112,9 +112,12 @@ dependencies = [
     "openai-harmony",
     # Cohere Command/Cohere2 output parser for reasoning and tool calls
     "cohere_melody>=0.9.0",
-    # mlx-vlm from commit 78b96eb. MiniMax M3 support is vendored under
-    # omlx.patches.mlx_vlm_minimax_m3_compat because upstream removed it.
-    "mlx-vlm @ git+https://github.com/Blaizzy/mlx-vlm@78b96eb5462141447b9a6b4943ef553891da56dd",
+    # mlx-vlm from commit 8683ec1 (v0.6.13) — includes vendored text models
+    # (Gemma/Phi/GLM/Cohere + 24 more), async prefill evaluation, top-nσ
+    # sampling, qwen3-vl PIL video inputs, attention-mask preservation, and
+    # restored MiniMax M3/M3-VL (vendored compat layer retained as belt-
+    # and-suspenders; upstream version wins on import order).
+    "mlx-vlm @ git+https://github.com/Blaizzy/mlx-vlm@8683ec195f57118e52674a5b97080f63db928b65",
     "Pillow>=9.0.0",
     # dflash-mlx v0.1.10 (9ca0028) - bstnxbt repo. Apple G17 NAX verify,
     # prefix snapshot metrics, CopySpec mode, and full-context draft-layer cache checks.
@@ -134,11 +137,13 @@ modelscope = [
     "modelscope>=1.10.0",
 ]
 audio = [
-    # mlx-audio from commit (5175326) with tts/stt/sts extras
-    # tts extra: misaki, num2words, spacy, phonemizer-fork, espeakng-loader, sentencepiece
-    # stt extra: tiktoken, mistral-common[audio]
-    # sts extra: tts deps + stt deps + webrtcvad
-    "mlx-audio[tts,stt,sts] @ git+https://github.com/Blaizzy/mlx-audio@51753266e0a4f766fd5e6fbc46652224efc23981",
+    # mlx-audio from commit 727fc93 (v0.4.8) — Qwen3-TTS sampling fixes
+    # (temperature/min-p/top-p), /v1/audio/voices endpoint, Dramabox /
+    # KittenTTS models, mlx-lm vendored (no cross-pin), mega ASR router.
+    # tts extra: misaki, num2words, spacy, phonemizer-fork, espeakng-loader,
+    # sentencepiece; stt extra: tiktoken, mistral-common[audio]; sts extra:
+    # tts deps + stt deps + webrtcvad.
+    "mlx-audio[tts,stt,sts] @ git+https://github.com/Blaizzy/mlx-audio@727fc9301de58b2179eff415710b7d95dda59169",
 ]
 paroquant = [
     # ParoQuant runtime loader for paroquant-quantized models. Installed
@@ -244,7 +249,7 @@ override-dependencies = [
     # allocation via numpy + MLX kernel); upstream main already dropped
     # the <5 bound, so this override tracks the fix before it ships.
     "xgrammar==0.2.4",
-    "transformers>=5.7.0,<5.13",
+    "transformers>=5.14.0,<5.16",
 ]
 
 [tool.black]

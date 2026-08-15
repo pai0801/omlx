@@ -703,8 +703,9 @@ def build_venvstacks():
         resolved_toml.unlink()
 
     # Install mlx-audio separately: build wheel from git, install --no-deps.
-    # mlx-audio pins mlx-lm==0.31.1 which conflicts with our git-pinned mlx-lm,
-    # so it can't go through venvstacks' uv resolver.
+    # Keeps the framework layer's resolver independent of mlx-audio's
+    # transitive pins (mlx / transformers / huggingface-hub are already
+    # provided by the mlx-base layer).
     _install_mlx_audio(EXPORT_DIR)
 
     # Install paroquant --no-deps. The official [mlx] extra requires
@@ -730,8 +731,12 @@ def build_venvstacks():
     return EXPORT_DIR
 
 
-# mlx-audio git commit — aligned with pyproject.toml [audio] extra
-_MLX_AUDIO_GIT = "git+https://github.com/Blaizzy/mlx-audio@51753266e0a4f766fd5e6fbc46652224efc23981"
+# mlx-audio git commit — aligned with pyproject.toml [audio] extra.
+# 0.4.8 vendors its mlx-lm usage (mlx_audio/lm), so the historical
+# mlx-lm==0.31.1 cross-pin conflict no longer applies; --no-deps install
+# is kept because mlx, transformers, huggingface-hub are already in the
+# framework layer.
+_MLX_AUDIO_GIT = "git+https://github.com/Blaizzy/mlx-audio@727fc9301de58b2179eff415710b7d95dda59169"
 
 
 def _install_mlx_audio(export_dir: Path):

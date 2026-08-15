@@ -16,12 +16,27 @@ def test_minimax_m3_compat_installs_vendor_modules():
     import mlx_vlm.models.minimax_m3  # noqa: F401
     import mlx_vlm.models.minimax_m3_vl  # noqa: F401
     import mlx_vlm.models.minimax_m3_vl.language as language
-    import mlx_vlm.models.minimax_m3_vl.msa as msa
     import mlx_vlm.tool_parsers.minimax_m3 as parser
 
     assert hasattr(language, "MiniMaxM3KVCache")
-    assert hasattr(msa, "build_grouped_msa_topk")
     assert hasattr(parser, "parse_tool_call")
+
+    # The standalone msa module only exists in the vendored (pre-0.6.14)
+    # layout; upstream refactored it into language.py. Assert it when the
+    # vendor copy is the one actually installed.
+    try:
+        import mlx_vlm.models.minimax_m3_vl.msa as msa
+    except ModuleNotFoundError:
+        assert language.__file__.startswith(str(_site_packages()))
+    else:
+        assert hasattr(msa, "build_grouped_msa_topk")
+
+
+def _site_packages():
+    import sysconfig
+    from pathlib import Path
+
+    return Path(sysconfig.get_paths()["purelib"]).resolve()
 
 
 def test_minimax_architecture_fallback_selects_text_model():
