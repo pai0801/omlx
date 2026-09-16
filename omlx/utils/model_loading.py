@@ -170,6 +170,10 @@ def maybe_apply_pre_load_patches(
       declares ``model_type == "glm_moe_dsa"``. Required because pinned
       mlx-lm exposes it as a bare DeepSeek-V3.2 subclass and cannot load
       checkpoints whose shared DSA layers carry no indexer weights.
+    - Spark-X2.5 ``spark2_5`` patch (vendored from mlx-optiq 0.5.8) when
+      ``config.json`` declares ``model_type == "spark2_5"``. The checkpoints
+      ship only PyTorch remote code, so stock mlx-lm rejects them with
+      ``Model type spark2_5 not supported``.
     - Native MTP patch (PR 990 + PR 15) when the config declares MTP heads
       on a supported model_type. Always applied for sanitize correctness;
       head attachment is gated by ``model_settings.mtp_enabled``.
@@ -229,6 +233,12 @@ def maybe_apply_pre_load_patches(
 
         if apply_hy_v3_patch():
             logger.info("Hy3 pre-load patch applied for %s", model_name)
+
+    if model_type == "spark2_5":
+        from ..patches.spark2_5 import apply_spark2_5_patch
+
+        if apply_spark2_5_patch():
+            logger.info("Spark-X2.5 pre-load patch applied for %s", model_name)
 
     text_config = config.get("text_config")
     text_model_type = (
