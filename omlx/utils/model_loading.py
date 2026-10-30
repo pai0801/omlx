@@ -240,6 +240,12 @@ def maybe_apply_pre_load_patches(
         if apply_spark2_5_patch():
             logger.info("Spark-X2.5 pre-load patch applied for %s", model_name)
 
+    if model_type == "bailing_hybrid":
+        from ..patches.bailing_hybrid import apply_bailing_hybrid_patch
+
+        if apply_bailing_hybrid_patch():
+            logger.info("Bailing hybrid pre-load patch applied for %s", model_name)
+
     text_config = config.get("text_config")
     text_model_type = (
         text_config.get("model_type") if isinstance(text_config, dict) else None
